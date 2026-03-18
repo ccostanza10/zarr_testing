@@ -22,4 +22,4 @@ ax.set_ylabel("Height (m)")
 ax.set_title("24-Hour Vertical Wind Profile")
 
 plt.savefig("/Users/costanza/data/M2HATS_20240722_WindProfiler.jpg")
-#os.system(f"open /Users/costanza/data/M2HATS_20240722_WindProfiler.jpg")
+os.system(f"open /Users/costanza/data/M2HATS_20240722_WindProfiler.jpg")
