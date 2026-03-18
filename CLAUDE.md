@@ -30,14 +30,16 @@ All scripts assume data lives under `/Users/costanza/data/` and write outputs th
 |---|---|
 | `create_zarr.py` | Creates a synthetic xarray Dataset and saves/reads it as Zarr |
 | `gdex_open.py` | Copies a remote Zarr v3 store (OSDF/GDEX) to local disk via xarray |
-| `make_zarr.py` | Reads radiosonde CSV files and writes each as a separate Zarr group |
+| `make_zarr.py` | Reads radiosonde CSV files and writes each as a separate Zarr group (v2) |
+| `make_zarr_2d.py` | Combines all sounding groups into a single 2D (sounding x level) Zarr store |
 | `open_zarr_make_wp.py` | Opens a remote Zarr wind profiler dataset and plots a 24-hour wind barb profile |
-| `zarr_skewt.py` | Opens a local Zarr radiosonde group and produces a skew-T log-P diagram with MetPy |
+| `zarr_skewt.py` | Plots a skew-T from the 2D store for a given date: `python zarr_skewt.py YYYYMMDD [-n N]` |
 
 ## Patterns
 
 - Remote Zarr access uses `fsspec.get_mapper(url)` passed to `xr.open_zarr()`.
-- Multi-sounding Zarr stores use Zarr groups (one group per sounding), opened with `consolidated=False`.
+- The original per-sounding Zarr groups (`make_zarr.py`) use Zarr v2 format; open with `zarr_format=2, consolidated=False`.
+- The combined 2D store (`make_zarr_2d.py`) has dims `(sounding, level)` with `launch_time` and `sounding_id` as coordinates. Shorter soundings are NaN-padded.
 - GDEX/OSDF remote data is Zarr v3 format (`zarr.json`, not `.zmetadata`); requires zarr >= 3.0.
 - When writing Zarr v3 locally, use `consolidated=False` to avoid non-standard consolidated metadata warnings.
 - Hardcoded paths are common; update them when adapting scripts.
