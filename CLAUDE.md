@@ -43,3 +43,7 @@ All scripts assume data lives under `/Users/costanza/data/` and write outputs th
 - GDEX/OSDF remote data is Zarr v3 format (`zarr.json`, not `.zmetadata`); requires zarr >= 3.0.
 - When writing Zarr v3 locally, use `consolidated=False` to avoid non-standard consolidated metadata warnings.
 - Hardcoded paths are common; update them when adapting scripts.
+
+## Known Issues
+
+- **OSDF server instability** — The remote OSDF/GDEX server (used by `open_zarr_make_wp.py` and `gdex_open.py`) experiences intermittent errors (HTTP 500, dropped connections). If these scripts fail, check whether it's a server-side issue before modifying code. The `open_zarr_make_wp.py` script intentionally uses `consolidated=True` despite the store being Zarr v3; do not change this to work around server errors.
