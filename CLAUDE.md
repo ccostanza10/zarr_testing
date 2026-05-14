@@ -34,6 +34,7 @@ All scripts assume data lives under `/Users/costanza/data/` and write outputs th
 | `make_zarr_2d.py` | Combines all sounding groups into a single 2D (sounding x level) Zarr store |
 | `open_zarr_make_wp.py` | Opens a remote Zarr wind profiler dataset and plots a 24-hour wind barb profile |
 | `zarr_skewt.py` | Plots a skew-T from the 2D store for a given date: `python zarr_skewt.py YYYYMMDD [-n N]` |
+| `combine_nc_to_zarr.py` | Combines per-flight C-130 CAESAR NetCDF files (`FF*/RF*/TF*.PNI.nc`) into a single Zarr store along `Time` |
 
 ## Patterns
 
@@ -43,6 +44,15 @@ All scripts assume data lives under `/Users/costanza/data/` and write outputs th
 - GDEX/OSDF remote data is Zarr v3 format (`zarr.json`, not `.zmetadata`); requires zarr >= 3.0.
 - When writing Zarr v3 locally, use `consolidated=False` to avoid non-standard consolidated metadata warnings.
 - Hardcoded paths are common; update them when adapting scripts.
+
+### `combine_nc_to_zarr.py` strategy
+
+The C-130 flight NetCDF files have schema drift across flights (variable counts range from ~300 to 716; some variables share a name but use different dim names like `Vector128` vs `F2DC003_P2D`; Time lengths are non-uniform). The script handles this by:
+
+1. **Computing the intersection of variable names** across all files and keeping only those (287 vars for the current data set).
+2. **Treating the first file's dim names as canonical** and renaming mismatched dims in later files (e.g. `F2DC003_P2D` → `Vector128`) so xarray's "different dimension names" check passes.
+3. **Writing the first file with an explicit `chunks=(time_chunk, ...)` encoding along `Time`** so every Time-dim variable has a uniform on-disk chunk grid regardless of any single file's length.
+4. **Appending each subsequent file with `align_chunks=True`** so xarray re-tiles each file's dask chunks onto the zarr grid before writing (avoids the "incompatible dask chunks" / "would overlap multiple Dask chunks" errors that come from trying to concat 16 differently-sized files in one shot).
 
 ## Known Issues
 
