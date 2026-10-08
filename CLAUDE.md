@@ -32,7 +32,7 @@ All scripts assume data lives under `/Users/costanza/data/` and write outputs th
 | `gdex_open.py` | Copies a remote Zarr v3 store (OSDF/GDEX) to local disk via xarray |
 | `make_zarr.py` | Reads radiosonde CSV files and writes each as a separate Zarr group (v2) |
 | `make_zarr_2d.py` | Combines all sounding groups into a single 2D (sounding x level) Zarr store |
-| `open_zarr_make_wp.py` | Opens a remote Zarr wind profiler dataset and plots a 24-hour wind barb profile |
+| `open_zarr_make_wp.py` | Plots 24-hour wind barb profiles from the remote 449 MHz profiler and/or local WindCube VAD stores: `python open_zarr_make_wp.py YYYYMMDD [-s profiler\|windcube\|both] [-e N]` |
 | `zarr_skewt.py` | Plots a skew-T from the 2D store for a given date: `python zarr_skewt.py YYYYMMDD [-n N]` |
 | `combine_nc_to_zarr.py` | Combines per-flight C-130 CAESAR NetCDF files (`FF*/RF*/TF*.PNI.nc`) into a single Zarr store along `Time` |
 
