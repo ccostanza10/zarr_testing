@@ -64,8 +64,7 @@ The 64 daily VAD files (2023-07-23 → 2023-09-24, 48 profiles/day, 100 height g
 3. **Rebuilds `time_bounds` from raw epoch seconds.** In the source files `time_bounds` holds Unix epoch seconds but has no `units` attribute, so CF decoding inherits `time`'s `seconds since <midnight>` units and lands ~53 years late (e.g. 2077). Always open source files with `decode_times=False` to read `time_bounds` correctly.
 4. **Writes CF time metadata:** `time` and `time_bounds` are int64 `seconds since 1970-01-01 00:00:00 UTC`, `calendar="standard"`. `time` gets `standard_name="time"`, `axis="T"`, and `long_name="Time (start of 30-minute averaging window)"`. After writing, `units`/`calendar` are removed from `time_bounds` with `zarr` so it inherits them from `time` (CF §7.1).
 5. **Global attrs:** drops per-file `history`/`command_line`; sets `Conventions="CF-1.8 ARM-1.1"`.
-
-Known gap: the source data variables carry `missing_value = -9999`; xarray decodes those to NaN and the store uses NaN as its fill value, so the -9999 sentinel is not recorded in the store's metadata (values are otherwise identical).
+6. **Preserves the -9999 missing-data marker.** Source data variables carry `missing_value = -9999`, which xarray decodes to NaN and doesn't carry through concat. The script reads those attrs from the first file (`decode_cf=False`) and writes `_FillValue = missing_value = -9999` in the encoding, so missing data is stored as -9999 on disk and still decodes to NaN in xarray.
 
 ## Known Issues
 

@@ -29,6 +29,13 @@ print(f"Keeping {len(common)} variables common to all files")
 with xr.open_dataset(files[0], decode_timedelta=True) as ds0:
     height = ds0["height"].load()
 
+# Source data variables flag missing data with missing_value (-9999). xarray
+# decodes those to NaN and doesn't carry the attribute through concat, so
+# capture it here and write it back as both _FillValue and missing_value.
+with xr.open_dataset(files[0], decode_cf=False) as raw0:
+    missing = {v: raw0[v].attrs["missing_value"]
+               for v in common if "missing_value" in raw0[v].attrs}
+
 datasets = []
 for f in files:
     with xr.open_dataset(f, decode_timedelta=True) as ds:
@@ -63,6 +70,8 @@ combined["time"].attrs.update(long_name="Time (start of 30-minute averaging wind
 for name in ("time", "time_bounds"):
     encoding[name].update(units="seconds since 1970-01-01 00:00:00 UTC",
                           calendar="standard", dtype="int64")
+for name, mv in missing.items():
+    encoding.setdefault(name, {}).update(_FillValue=mv, missing_value=mv)
 combined.to_zarr(out_path, mode="w", consolidated=False, encoding=encoding)
 
 # Per CF 7.1, bounds inherit units/calendar from their parent coordinate, so
