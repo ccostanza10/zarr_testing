@@ -35,6 +35,7 @@ All scripts assume data lives under `/Users/costanza/data/` and write outputs th
 | `open_zarr_make_wp.py` | Plots 24-hour wind barb profiles from the remote 449 MHz profiler and/or local WindCube VAD stores: `python open_zarr_make_wp.py YYYYMMDD [-s profiler\|windcube\|both] [-e N]` |
 | `zarr_skewt.py` | Plots a skew-T from the 2D store for a given date: `python zarr_skewt.py YYYYMMDD [-n N]` |
 | `combine_nc_to_zarr.py` | Combines per-flight C-130 CAESAR NetCDF files (`FF*/RF*/TF*.PNI.nc`) into a single Zarr store along `Time` |
+| `combine_VAD_to_zarr.py` | Combines daily M2HATS WindCube 30-min VAD files (`30min_winds_*.nc`) into `m2hats_windcube_vad30min_combined.zarr` along `time` |
 
 ## Patterns
 
@@ -53,6 +54,18 @@ The C-130 flight NetCDF files have schema drift across flights (variable counts 
 2. **Treating the first file's dim names as canonical** and renaming mismatched dims in later files (e.g. `F2DC003_P2D` → `Vector128`) so xarray's "different dimension names" check passes.
 3. **Writing the first file with an explicit `chunks=(time_chunk, ...)` encoding along `Time`** so every Time-dim variable has a uniform on-disk chunk grid regardless of any single file's length.
 4. **Appending each subsequent file with `align_chunks=True`** so xarray re-tiles each file's dask chunks onto the zarr grid before writing (avoids the "incompatible dask chunks" / "would overlap multiple Dask chunks" errors that come from trying to concat 16 differently-sized files in one shot).
+
+### `combine_VAD_to_zarr.py` strategy
+
+The 64 daily VAD files (2023-07-23 → 2023-09-24, 48 profiles/day, 100 height gates) use the ARM `base_time`/`time_offset`/`time` layout, where each file's times are relative to that day's midnight. The script:
+
+1. **Drops `base_time` and `time_offset`** — both only make sense per file; `time_offset` decodes to the same values as `time`.
+2. **Uses the first file's `height` as canonical** — gates jitter up to ~0.22 m between days; the script errors if any day differs by > 1 m.
+3. **Rebuilds `time_bounds` from raw epoch seconds.** In the source files `time_bounds` holds Unix epoch seconds but has no `units` attribute, so CF decoding inherits `time`'s `seconds since <midnight>` units and lands ~53 years late (e.g. 2077). Always open source files with `decode_times=False` to read `time_bounds` correctly.
+4. **Writes CF time metadata:** `time` and `time_bounds` are int64 `seconds since 1970-01-01 00:00:00 UTC`, `calendar="standard"`. `time` gets `standard_name="time"`, `axis="T"`, and `long_name="Time (start of 30-minute averaging window)"`. After writing, `units`/`calendar` are removed from `time_bounds` with `zarr` so it inherits them from `time` (CF §7.1).
+5. **Global attrs:** drops per-file `history`/`command_line`; sets `Conventions="CF-1.8 ARM-1.1"`.
+
+Known gap: the source data variables carry `missing_value = -9999`; xarray decodes those to NaN and the store uses NaN as its fill value, so the -9999 sentinel is not recorded in the store's metadata (values are otherwise identical).
 
 ## Known Issues
 
