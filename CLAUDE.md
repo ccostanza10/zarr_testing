@@ -35,7 +35,8 @@ All scripts assume data lives under `/Users/costanza/data/` and write outputs th
 | `open_zarr_make_wp.py` | Plots 24-hour wind barb profiles from the remote 449 MHz profiler and/or local WindCube VAD stores: `python open_zarr_make_wp.py YYYYMMDD [-s profiler\|windcube\|both] [-e N]` |
 | `zarr_skewt.py` | Plots a skew-T from the 2D store for a given date: `python zarr_skewt.py YYYYMMDD [-n N]` |
 | `combine_nc_to_zarr.py` | Combines per-flight C-130 CAESAR NetCDF files (`FF*/RF*/TF*.PNI.nc`) into a single Zarr store along `Time` |
-| `combine_VAD_to_zarr.py` | Combines daily M2HATS WindCube 30-min VAD files (`30min_winds_*.nc`) into `m2hats_windcube_vad30min_combined.zarr` along `time` |
+| `combine_VAD_to_zarr.py` | Combines daily M2HATS WindCube VAD files into one Zarr store along `time`: `python combine_VAD_to_zarr.py [-d 30min\|scan]`. `30min` (default): `30min_winds_*.nc` → `m2hats_windcube_vad30min_combined.zarr`; `scan`: per-scan `VAD_*.nc` → `m2hats_windcube_vad_combined.zarr` |
+| `verify_vad_zarr.py` | Checks a store from `combine_VAD_to_zarr.py` against its source files (profile count, every variable's raw values, -9999 counts, time/time_bounds floored to seconds, height within 1 m): `python verify_vad_zarr.py [-d scan\|30min]`. Exits 1 on any mismatch. Its `DATASETS` patterns/stores must match the combine script's |
 
 ## Patterns
 
@@ -57,14 +58,20 @@ The C-130 flight NetCDF files have schema drift across flights (variable counts 
 
 ### `combine_VAD_to_zarr.py` strategy
 
-The 64 daily VAD files (2023-07-23 → 2023-09-24, 48 profiles/day, 100 height gates) use the ARM `base_time`/`time_offset`/`time` layout, where each file's times are relative to that day's midnight. The script:
+Two sets of 64 daily files (2023-07-23 → 2023-09-24, 100 height gates), chosen with `-d`, both use the ARM `base_time`/`time_offset`/`time` layout, where each file's times are relative to that day's midnight:
+
+- `30min` — `30min_winds_*.nc`, 48 regular 30-min profiles/day (3072 total).
+- `scan` — `VAD_*.nc`, one profile per PPI scan, irregular (158–1297/day, 77,531 total). Times have fractional seconds.
+
+Per-dataset settings (input glob, output store, time chunk, `time` long_name) live in the `DATASETS` dict. The script:
 
 1. **Drops `base_time` and `time_offset`** — both only make sense per file; `time_offset` decodes to the same values as `time`.
 2. **Uses the first file's `height` as canonical** — gates jitter up to ~0.22 m between days; the script errors if any day differs by > 1 m.
 3. **Rebuilds `time_bounds` from raw epoch seconds.** In the source files `time_bounds` holds Unix epoch seconds but has no `units` attribute, so CF decoding inherits `time`'s `seconds since <midnight>` units and lands ~53 years late (e.g. 2077). Always open source files with `decode_times=False` to read `time_bounds` correctly.
-4. **Writes CF time metadata:** `time` and `time_bounds` are int64 `seconds since 1970-01-01 00:00:00 UTC`, `calendar="standard"`. `time` gets `standard_name="time"`, `axis="T"`, and `long_name="Time (start of 30-minute averaging window)"`. After writing, `units`/`calendar` are removed from `time_bounds` with `zarr` so it inherits them from `time` (CF §7.1).
+4. **Writes CF time metadata:** `time` and `time_bounds` are int64 `seconds since 1970-01-01 00:00:00 UTC`, `calendar="standard"`. Whole seconds are deliberate: the per-scan fractional seconds are floored (`time` equals `time_bounds[:,0]`). `time` gets `standard_name="time"`, `axis="T"`, and a per-dataset `long_name` ("start of 30-minute averaging window" / "start of PPI scan"). The script errors on duplicate times. After writing, `units`/`calendar` are removed from `time_bounds` with `zarr` so it inherits them from `time` (CF §7.1).
 5. **Global attrs:** drops per-file `history`/`command_line`; sets `Conventions="CF-1.8 ARM-1.1"`.
-6. **Preserves the -9999 missing-data marker.** Source data variables carry `missing_value = -9999`, which xarray decodes to NaN and doesn't carry through concat. The script reads those attrs from the first file (`decode_cf=False`) and writes `_FillValue = missing_value = -9999` in the encoding, so missing data is stored as -9999 on disk and still decodes to NaN in xarray.
+6. **Preserves the -9999 missing-data marker.** Source data variables carry `missing_value = -9999`, which xarray decodes to NaN and doesn't carry through concat. The script reads those attrs from the first file (`decode_cf=False`) and writes `_FillValue = missing_value = -9999` in the encoding, so missing data is stored as -9999 on disk and still decodes to NaN in xarray. The source dtype is kept too, so `nbeams_used` stays int32 on disk (xarray still decodes it to float64).
+7. **`lat`/`lon`/`alt` are -9999 in every source file of both sets**, so they decode to NaN. That comes from the source files, not the script.
 
 ## Known Issues
 
