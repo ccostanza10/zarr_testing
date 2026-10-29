@@ -1,13 +1,38 @@
+import argparse
 import glob
 import numpy as np
 import xarray as xr
 import zarr
 
 data_dir = "/Users/costanza/data"
-out_path = f"{data_dir}/m2hats_windcube_vad30min_combined.zarr"
-time_chunk = 48 * 7  # one week of 30-min profiles per chunk
 
-files = sorted(glob.glob(f"{data_dir}/30min*.nc"))
+# Each dataset maps to its input files, output store, chunk size along time
+# and the long_name for time.
+DATASETS = {
+    "30min": {
+        "pattern": "30min*.nc",
+        "out": "m2hats_windcube_vad30min_combined.zarr",
+        "time_chunk": 48 * 7,  # one week of 30-min profiles per chunk
+        "time_long_name": "Time (start of 30-minute averaging window)",
+    },
+    "scan": {
+        "pattern": "VAD_*.nc",
+        "out": "m2hats_windcube_vad_combined.zarr",
+        "time_chunk": 1300 * 7,  # roughly one week of per-scan profiles per chunk
+        "time_long_name": "Time (start of PPI scan)",
+    },
+}
+
+parser = argparse.ArgumentParser(description="Combine daily M2HATS WindCube VAD files into one Zarr store")
+parser.add_argument("-d", "--dataset", choices=DATASETS, default="30min",
+                    help="Which VAD files to combine (default: 30min)")
+args = parser.parse_args()
+
+cfg = DATASETS[args.dataset]
+out_path = f"{data_dir}/{cfg['out']}"
+time_chunk = cfg["time_chunk"]
+
+files = sorted(glob.glob(f"{data_dir}/{cfg['pattern']}"))
 print(f"Found {len(files)} files")
 
 # Variables present in every file (intersection on name).
@@ -30,10 +55,11 @@ with xr.open_dataset(files[0], decode_timedelta=True) as ds0:
     height = ds0["height"].load()
 
 # Source data variables flag missing data with missing_value (-9999). xarray
-# decodes those to NaN and doesn't carry the attribute through concat, so
-# capture it here and write it back as both _FillValue and missing_value.
+# decodes those to NaN (promoting ints to float) and doesn't carry the
+# attribute through concat, so capture it and the on-disk dtype here and write
+# them back with -9999 as both _FillValue and missing_value.
 with xr.open_dataset(files[0], decode_cf=False) as raw0:
-    missing = {v: raw0[v].attrs["missing_value"]
+    missing = {v: (raw0[v].attrs["missing_value"], raw0[v].dtype)
                for v in common if "missing_value" in raw0[v].attrs}
 
 datasets = []
@@ -46,6 +72,9 @@ for f in files:
     with xr.open_dataset(f, decode_times=False) as raw:
         bounds = raw["time_bounds"].values.astype("int64").astype("datetime64[s]")
     ds["time_bounds"] = (ds["time_bounds"].dims, bounds.astype("datetime64[ns]"))
+    # Per-scan times carry fractional seconds; store whole seconds like the
+    # bounds so time still equals the start bound.
+    ds["time"] = ds["time"].dt.floor("s")
     max_diff = float(np.abs(ds["height"].values - height.values).max())
     if max_diff > 1.0:
         raise ValueError(f"{f}: height differs from canonical by {max_diff:.3f} m")
@@ -54,6 +83,8 @@ for f in files:
 combined = xr.concat(datasets, dim="time", data_vars="minimal", coords="minimal",
                      compat="override", join="exact")
 combined = combined.sortby("time")
+if not combined.indexes["time"].is_unique:
+    raise ValueError("Duplicate times across files")
 combined.attrs.pop("history", None)
 combined.attrs.pop("command_line", None)
 combined.attrs["Conventions"] = "CF-1.8 ARM-1.1"
@@ -65,13 +96,13 @@ encoding = {
 }
 
 # CF time metadata: one epoch reference for all time variables.
-combined["time"].attrs.update(long_name="Time (start of 30-minute averaging window)",
+combined["time"].attrs.update(long_name=cfg["time_long_name"],
                                standard_name="time", axis="T")
 for name in ("time", "time_bounds"):
     encoding[name].update(units="seconds since 1970-01-01 00:00:00 UTC",
                           calendar="standard", dtype="int64")
-for name, mv in missing.items():
-    encoding.setdefault(name, {}).update(_FillValue=mv, missing_value=mv)
+for name, (mv, dtype) in missing.items():
+    encoding.setdefault(name, {}).update(_FillValue=mv, missing_value=mv, dtype=dtype)
 combined.to_zarr(out_path, mode="w", consolidated=False, encoding=encoding)
 
 # Per CF 7.1, bounds inherit units/calendar from their parent coordinate, so
